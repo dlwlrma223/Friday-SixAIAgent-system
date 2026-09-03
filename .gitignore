@@ -1,0 +1,42 @@
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node / TypeScript (frontend, api)
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python (agent)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Docker / infra
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
