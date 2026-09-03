@@ -185,3 +185,13 @@ Work through phases in order. Each phase has a "definition of done" — do not m
 ## 9. When in doubt
 
 If a task requires a decision this file doesn't cover, or touches money, credentials, or an external account signup, stop and ask the user rather than guessing. It's fine to scaffold and stub in the meantime.
+
+## 10. Engineering review roles for Claude Code
+
+3 specialized subagents live in `.claude/agents/` for review/dev work on this repo — separate from the 6 product agents in section 1 (Calendar/Home/Research/Study/Finance/Jobs), which are the product being built, not roles Claude Code plays:
+
+- `.claude/agents/network-security-agent.md` — 🛡️ Network Security Agent (網絡安全專家): OWASP/secrets/auth/secure-protocol review.
+- `.claude/agents/qa-tester-agent.md` — 🧪 QA Tester Agent (自動化測試專家): unit/integration tests, edge cases.
+- `.claude/agents/clean-code-agent.md` — 🧹 Clean Code & Refactoring Agent (代碼優化與重構專家): DRY, dead-code removal, style.
+
+**Interaction workflow**: When the user asks for a review, ask which agent they want deployed, or pick the most appropriate one automatically based on the request, and invoke it via the Agent tool with the matching `subagent_type`. Each agent's own file defines its response prefix (e.g. `[🛡️ Network Security Agent]`).
