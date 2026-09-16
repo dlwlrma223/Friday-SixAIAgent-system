@@ -12,7 +12,9 @@ The 6 agents: **Calendar, Home, Research, Study, Finance, Jobs**.
 
 ## 2. Language
 
-Communicate with the user primarily in **Traditional Chinese (繁體中文)** — commit messages, PR descriptions, code comments explaining non-obvious logic, README files, and any chat/CLI output to the user. Variable names, function names, and other identifiers in code stay in English as normal. English technical terms (API, endpoint, schema, etc.) can stay in English inline within Chinese sentences where that's the natural convention.
+Communicate with the user primarily in **Traditional Chinese (繁體中文)** — commit messages, PR descriptions, README files, and any chat/CLI output to the user. Variable names, function names, and other identifiers in code stay in English as normal. English technical terms (API, endpoint, schema, etc.) can stay in English inline within Chinese sentences where that's the natural convention.
+
+**Code comments are the one exception: write them short and in English**, not Traditional Chinese. Only comment the non-obvious "why" (a hidden constraint, a workaround, a subtle invariant) — one line is enough. Detailed rationale, decision history, and "what changed and why" belong in the progress log (see Section 11), not in inline comments — the user reads the log for that, not the source.
 
 ## 3. Non-negotiable design rules
 
@@ -114,15 +116,17 @@ Work through phases in order. Each phase has a "definition of done" — do not m
 - [ ] `frontend` can hit `api` health check and render status
 - **Done when:** `docker compose up` brings up all 5 services with no errors, frontend shows "connected".
 
-### Phase 1 — AWS foundation
-- [ ] **[ASK USER]** confirm AWS account/region before creating any resource
-- [ ] ECR repos for `api` and `agent` images
-- [ ] ECS Fargate cluster with two services
-- [ ] RDS Postgres instance, `pgvector` extension enabled
-- [ ] ElastiCache Redis
-- [ ] Secrets Manager entries for DB credentials at minimum
-- [ ] VPC/security groups: RDS and Redis reachable only from within the ECS cluster's VPC, not public
-- **Done when:** `api` service deployed on ECS can read/write RDS through the deployed environment, verified via a smoke-test endpoint.
+### Phase 1 — AWS foundation ✅ done
+- [x] **[ASK USER]** confirm AWS account/region before creating any resource — ap-southeast-1
+- [x] ECR repos for `api` and `agent` images
+- [x] ECS Fargate cluster with two services
+- [x] RDS Postgres instance, `pgvector` extension enabled
+- [x] ElastiCache Redis
+- [x] Secrets Manager entries for DB credentials at minimum
+- [x] VPC/security groups: RDS and Redis reachable only from within the ECS cluster's VPC, not public
+- **Done when:** `api` service deployed on ECS can read/write RDS through the deployed environment, verified via a smoke-test endpoint. — verified via `/db-check`.
+
+Bonus (beyond this phase's checklist): `frontend` deployed to S3 + CloudFront (see `infra/aws-resources.md`). `api` still only reachable via its ECS task's public IP (no ALB yet — deferred, costs ~$16-17/mo after the 12-month free tier).
 
 ### Phase 2 — Calendar agent
 - [ ] **[ASK USER]** for iCloud app-specific password before implementing — do not attempt with the primary Apple ID password
@@ -181,6 +185,7 @@ Work through phases in order. Each phase has a "definition of done" — do not m
 - Every endpoint that mutates data validates its input and returns a typed error on failure — no silent failures.
 - Commit messages reference the phase (e.g. `phase2: add CalDAV write endpoint`).
 - Write a short README per top-level folder (`api/README.md` etc.) explaining how to run and test that piece in isolation.
+- `api/test/` (and any other test folders) are gitignored — tests run locally only, not committed.
 
 ## 9. When in doubt
 
@@ -195,3 +200,9 @@ If a task requires a decision this file doesn't cover, or touches money, credent
 - `.claude/agents/clean-code-agent.md` — 🧹 Clean Code & Refactoring Agent (代碼優化與重構專家): DRY, dead-code removal, style.
 
 **Interaction workflow**: When the user asks for a review, ask which agent they want deployed, or pick the most appropriate one automatically based on the request, and invoke it via the Agent tool with the matching `subagent_type`. Each agent's own file defines its response prefix (e.g. `[🛡️ Network Security Agent]`).
+
+## 11. Progress log
+
+Keep a running project log at `.claude/progress-log.pdf` (source: `.claude/progress-log.html`, gitignored, local-only — not the same thing as this CLAUDE.md working brief). Update it whenever meaningful work happens: what was done, which files were touched and why, and any difficulty hit along the way and how it was resolved. Write it in Traditional Chinese, organized by phase/session.
+
+**Voice: write it as the user, in first person** ("我建了...", "我改成...", "我遇到...然後我...") — as if the user is journaling their own work, not as Claude Code reporting to a client. Never write it as an assistant addressing or describing "the user" in third person, and never phrase entries as the user commanding/instructing Claude. This is the user's own record of what they built. Regenerate the PDF from the HTML source whenever asked to update the log, or proactively after a substantial chunk of work (e.g. finishing a phase, a significant debugging session, a security-fix pass) — convert with headless Chrome: `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu --print-to-pdf="progress-log.pdf" --no-pdf-header-footer "file://<path>/progress-log.html"` (textutil/cupsfilter/pandoc are not reliable for HTML→PDF on this machine).

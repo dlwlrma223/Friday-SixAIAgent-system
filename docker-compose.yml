@@ -8,9 +8,7 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     ports:
-      # 只綁定 127.0.0.1：db 只給同機的其他 container / 本機工具（如 psql、MCP）連線，
-      # 不對區網開放，避免同一 Wi-Fi 上的其他裝置也能連到本機 Postgres。
-      # 這個「非 0.0.0.0」的習慣要帶進 Phase 1 的 AWS SG／VPC 設計：RDS 一樣不能公開。
+      # localhost-only: no LAN exposure for local Postgres (same principle as RDS not being public).
       - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-friday}"]
@@ -21,7 +19,7 @@ services:
   redis:
     image: redis:7
     ports:
-      # 同上：只綁 127.0.0.1，redis 沒有密碼保護，不該讓區網內其他裝置連得到。
+      # localhost-only: redis has no auth, don't expose it to the LAN.
       - "127.0.0.1:${REDIS_PORT:-6380}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -30,12 +28,15 @@ services:
       retries: 10
 
   api:
-    build: ./api
+    build:
+      context: ./api
+      # ECR/ECS builds omit --target and get the Dockerfile's last stage (production).
+      target: dev
     environment:
       PORT: 3001
       DATABASE_URL: postgres://${POSTGRES_USER:-friday}:${POSTGRES_PASSWORD:-friday}@db:5432/${POSTGRES_DB:-friday}
       REDIS_URL: redis://redis:6379
-      # 瀏覽器打 api 時帶的 Origin 會是 frontend 對外映射的 port，CORS 允許清單要跟這裡對齊。
+      # Must match the origin the browser sends when hitting api (frontend's mapped port).
       CORS_ORIGIN: http://localhost:${FRONTEND_PORT:-8080}
     ports:
       - "${API_PORT:-3001}:3001"

@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 *.pem
+!api/certs/*.pem
 *.key
 
 # Node / TypeScript (frontend, api)
@@ -26,10 +27,16 @@ venv/
 .ruff_cache/
 .pytest_cache/
 
+# Tests run locally only, not committed
+api/test/
+
 # Docker / infra
 *.tfstate
 *.tfstate.*
 .terraform/
+
+infra/aws-resources.md
+
 
 # Editor / OS
 .vscode/
