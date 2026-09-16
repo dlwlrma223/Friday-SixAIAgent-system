@@ -8,11 +8,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("agent")
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+# Set in prod (ElastiCache AUTH). Local compose redis has no password.
+REDIS_AUTH_TOKEN = os.environ.get("REDIS_AUTH_TOKEN")
 HEARTBEAT_INTERVAL_SECONDS = 5
 
 
 def main() -> None:
-    client = redis.Redis.from_url(REDIS_URL)
+    client = redis.Redis.from_url(REDIS_URL, password=REDIS_AUTH_TOKEN)
 
     while True:
         try:
