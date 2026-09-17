@@ -11,6 +11,19 @@ npm run dev
 
 Health check: `GET http://localhost:3001/health`
 
+## Database migrations
+
+Schema 用 `migrations/` 底下的編號 SQL 檔管理（`0001_xxx.sql`、`0002_xxx.sql`…），
+api 跟 agent 共用同一份。runner 會把套過的檔名記在 `schema_migrations` 表，
+每個檔案只套一次，套用時包在 transaction 裡，失敗就整個 rollback。
+
+```
+npm run migrate:dev        # 本機（docker compose 起來後，在 api 容器內或本機直接跑）
+node dist/migrate.js       # production image 內（透過 ECS exec）
+```
+
+新增 migration：在 `migrations/` 加一個新編號的 `.sql`，**不要改已經套過的檔案**。
+
 ## Typecheck
 
 ```

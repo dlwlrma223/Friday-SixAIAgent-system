@@ -30,7 +30,7 @@ Communicate with the user primarily in **Traditional Chinese (繁體中文)** �
 |---|---|
 | Frontend | React + Vite + TypeScript |
 | API backend | Node.js + TypeScript (Fastify) |
-| Agent orchestrator | Python (CrewAI or LangGraph — pick one at Phase 1 and stay consistent) |
+| Agent orchestrator | Python (LangGraph — decided at Phase 2, do not switch) |
 | Database | PostgreSQL (RDS in prod) with `pgvector` extension |
 | Queue / pub-sub | Redis (ElastiCache in prod) |
 | Local dev | Docker Compose |
@@ -128,16 +128,16 @@ Work through phases in order. Each phase has a "definition of done" — do not m
 
 Bonus (beyond this phase's checklist): `frontend` deployed to S3 + CloudFront (see `infra/aws-resources.md`). `api` still only reachable via its ECS task's public IP (no ALB yet — deferred, costs ~$16-17/mo after the 12-month free tier).
 
-### Phase 2 — Calendar agent
+### Phase 2 — Research agent (internal tool)
+- [x] **[ASK USER]** which search API to use — Tavily (decided 2026-09-16); key lives in `.env` locally as `TAVILY_API_KEY`, Secrets Manager in prod
+- [ ] Implement as a callable tool inside the `agent` orchestrator, not a standalone user-facing agent
+- **Done when:** another agent (test with a stub) can call Research and get back structured results.
+
+### Phase 3 — Calendar agent
 - [ ] **[ASK USER]** for iCloud app-specific password before implementing — do not attempt with the primary Apple ID password
 - [ ] CalDAV client in `api` (or `agent`, pick one and be consistent) reads events, writes new events
 - [ ] Dashboard shows upcoming events
 - **Done when:** creating an event via the dashboard shows up in the actual iCloud calendar within a minute.
-
-### Phase 3 — Research agent (internal tool)
-- [ ] **[ASK USER]** which search API to use (Tavily vs SerpAPI) and get the key
-- [ ] Implement as a callable tool inside the `agent` orchestrator, not a standalone user-facing agent
-- **Done when:** another agent (test with a stub) can call Research and get back structured results.
 
 ### Phase 4 — Study agent
 - [ ] `subjects` seeded with the 5 subjects the user gave: English, Japanese, taxi license (的士牌), electrician (電工), AWS SAA

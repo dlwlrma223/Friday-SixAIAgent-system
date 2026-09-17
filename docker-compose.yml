@@ -34,7 +34,13 @@ services:
       target: dev
     environment:
       PORT: 3001
-      DATABASE_URL: postgres://${POSTGRES_USER:-friday}:${POSTGRES_PASSWORD:-friday}@db:5432/${POSTGRES_DB:-friday}
+      # Same variable names as the ECS task definition, so app code has one code path.
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-friday}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-friday}
+      DB_NAME: ${POSTGRES_DB:-friday}
+      DB_SSL: disable
       REDIS_URL: redis://redis:6379
       # Must match the origin the browser sends when hitting api (frontend's mapped port).
       CORS_ORIGIN: http://localhost:${FRONTEND_PORT:-8080}

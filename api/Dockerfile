@@ -20,6 +20,7 @@ FROM base AS production
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY certs ./certs
+COPY migrations ./migrations
 RUN useradd --system --create-home --shell /usr/sbin/nologin appuser \
   && chown -R appuser:appuser /app
 USER appuser
