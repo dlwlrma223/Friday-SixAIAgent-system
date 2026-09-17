@@ -4,6 +4,7 @@
 !.env.example
 *.pem
 !api/certs/*.pem
+!agent/certs/*.pem
 *.key
 
 # Node / TypeScript (frontend, api)
