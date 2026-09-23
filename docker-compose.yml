@@ -59,9 +59,20 @@ services:
     build: ./agent
     environment:
       REDIS_URL: redis://redis:6379
+      # Same names as the ECS task definition (agent talks to Postgres directly).
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-friday}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-friday}
+      DB_NAME: ${POSTGRES_DB:-friday}
+      DB_SSL: disable
+      # Read from .env; empty means Research tool refuses to start, nothing else breaks.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
     volumes:
       - ./agent:/app
     depends_on:
+      db:
+        condition: service_healthy
       redis:
         condition: service_healthy
 

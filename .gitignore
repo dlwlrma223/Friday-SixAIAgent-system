@@ -30,6 +30,7 @@ venv/
 
 # Tests run locally only, not committed
 api/test/
+agent/tests/
 
 # Docker / infra
 *.tfstate
