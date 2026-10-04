@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit",
     "migrate": "node dist/migrate.js",
     "migrate:dev": "tsx src/migrate.ts",
-    "test": "node --import tsx --test test/health.test.ts test/db-check.test.ts test/cors.test.ts test/dashboard.test.ts",
-    "test:watch": "node --import tsx --test --watch test/health.test.ts test/db-check.test.ts test/cors.test.ts test/dashboard.test.ts"
+    "test": "node --import tsx --test test/health.test.ts test/db-check.test.ts test/cors.test.ts test/dashboard.test.ts test/calendar.test.ts",
+    "test:watch": "node --import tsx --test --watch test/health.test.ts test/db-check.test.ts test/cors.test.ts test/dashboard.test.ts test/calendar.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",

@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import { calendarRoutes } from "./calendar.js";
 import { dashboardRoutes } from "./dashboard.js";
 import { createDbClientFromEnv, type DbClientLike } from "./db.js";
 import { createRedisPublisherFromEnv, type Publish } from "./pubsub.js";
@@ -67,6 +68,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   app.register(dashboardRoutes, { createDbClient, publish, dashboardToken });
+  app.register(calendarRoutes, { createDbClient, dashboardToken });
 
   return app;
 }

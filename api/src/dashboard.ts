@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requireDashboardToken } from "./auth.js";
+import { protectRoutes } from "./auth.js";
 import { withDb, type DbClientLike } from "./db.js";
 import { APPROVALS_CHANNEL, type Publish } from "./pubsub.js";
 
@@ -29,12 +29,7 @@ function parseLimit(raw: string | undefined): number | undefined {
 export async function dashboardRoutes(app: FastifyInstance, opts: DashboardRouteOptions): Promise<void> {
   const { createDbClient, publish } = opts;
 
-  app.addHook("onRequest", requireDashboardToken(opts.dashboardToken));
-
-  app.setErrorHandler((err, _req, reply) => {
-    app.log.error(err);
-    return reply.code(503).send({ status: "error", message: "database unreachable" });
-  });
+  protectRoutes(app, opts.dashboardToken);
 
   app.get<{ Querystring: { status?: string } }>("/approvals", async (req, reply) => {
     const status = req.query.status ?? "pending";

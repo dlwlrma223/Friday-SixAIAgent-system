@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value).digest();
@@ -23,4 +23,19 @@ export function requireDashboardToken(expected: string | undefined) {
       return reply.code(401).send({ status: "error", message: "unauthorized" });
     }
   };
+}
+
+// Shared setup for every dashboard-facing plugin: token on all routes, and a
+// typed 503 instead of Fastify's default 500 when the DB is unreachable.
+export function protectRoutes(app: FastifyInstance, expected: string | undefined): void {
+  app.addHook("onRequest", requireDashboardToken(expected));
+  app.setErrorHandler((err, _req, reply) => {
+    // Fastify's own request errors (bad JSON, body too large) are the client's fault.
+    const status = (err as { statusCode?: number }).statusCode;
+    if (status !== undefined && status >= 400 && status < 500) {
+      return reply.code(status).send({ status: "error", message: "invalid request" });
+    }
+    app.log.error(err);
+    return reply.code(503).send({ status: "error", message: "database unreachable" });
+  });
 }
