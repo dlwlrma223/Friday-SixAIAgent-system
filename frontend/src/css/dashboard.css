@@ -186,6 +186,10 @@ html,body{
 .approval-body p.title{font-size:12.5px;color:var(--text);line-height:1.4;font-family:'Space Grotesk',sans-serif;}
 .approval-body p.sub{font-size:10.5px;color:var(--text-faint);margin-top:3px;}
 .approval-actions{display:flex;gap:6px;margin-top:8px;}
+.approval-body p.detail{white-space:pre-wrap;overflow-wrap:anywhere;}
+.btn:disabled{opacity:.5;cursor:default;}
+.token-input{flex:1;min-width:0;background:transparent;border:1px solid var(--line);color:var(--text);font:inherit;font-size:11px;padding:4px 8px;}
+.token-input:focus{outline:none;border-color:var(--amber-dim);}
 .btn{
   font-family:'IBM Plex Mono',monospace;
   font-size:10px;

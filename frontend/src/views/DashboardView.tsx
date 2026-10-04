@@ -51,7 +51,7 @@ function DashboardView() {
         <div className="panel">
           <div className="panel-head">
             <h2>Needs Your Approval</h2>
-            <span className="count" id="approvalCount">4 pending</span>
+            <span className="count" id="approvalCount">…</span>
           </div>
           <div className="approvals-list" id="approvalsList"></div>
           <div className="panel-head" style={{ borderTop: "1px solid var(--line)" }}>

@@ -1,3 +1,16 @@
+import {
+  ApiError,
+  fetchPendingApprovals,
+  fetchResearchQueries,
+  getToken,
+  resolveApproval,
+  setToken,
+  type Approval,
+  type ResearchQuery,
+} from "../api";
+
+const POLL_INTERVAL_MS = 4000;
+
 interface DomainDef {
   name: string;
   cx: number;
@@ -23,17 +36,6 @@ interface Pulse {
   speed: number;
 }
 
-interface ApprovalItem {
-  tag: string;
-  title: string;
-  sub: string;
-}
-
-interface LogItem {
-  agent: string;
-  text: string;
-}
-
 interface QueueItem {
   name: string;
   agent: string;
@@ -54,28 +56,6 @@ const DOMAINS: DomainDef[] = [
   { name: "STUDY", cx: 0.2, cy: 0.72, n: 7 },
   { name: "FINANCE", cx: 0.52, cy: 0.82, n: 6 },
   { name: "JOBS", cx: 0.8, cy: 0.7, n: 8 },
-];
-
-const APPROVALS_SEED: ApprovalItem[] = [
-  { tag: "JOBS", title: "Apply to Frontend Engineer role at Acme Co. — cover letter drafted", sub: "Match score 87% against your CV · closes in 2 days" },
-  { tag: "JOBS", title: "Apply to Product Analyst role at Northwind — tailored CV ready", sub: "Match score 74% · salary range within your target" },
-  { tag: "FINANCE", title: "Confirm autopay for internet bill — $58.40, due in 3 days", sub: "Vendor: Telus · recurring, no change from last month" },
-  { tag: "STUDY", title: "Schedule 90-min review block for System Design course", sub: "You're 2 modules behind your own pace plan" },
-  { tag: "HOME", title: "Approve grocery reorder — usual list, 1 item swapped (out of stock)", sub: "Oat milk → almond milk substitution" },
-];
-
-const LOG_POOL: LogItem[] = [
-  { agent: "JOBS", text: "scanned 34 new postings, 3 matched your criteria" },
-  { agent: "JOBS", text: "submitted application to Acme Co. — Frontend Engineer" },
-  { agent: "CALENDAR", text: "found a 30-min gap tomorrow, holding for deep work" },
-  { agent: "FINANCE", text: "detected duplicate charge from streaming service" },
-  { agent: "RESEARCH", text: "summarized 3 articles on your reading list" },
-  { agent: "HOME", text: "delivery ETA updated — arriving between 2–4pm" },
-  { agent: "STUDY", text: "logged 45 min on System Design course, streak: 6 days" },
-  { agent: "STUDY", text: "flagged a topic you keep re-reading — suggests a quiz" },
-  { agent: "CHIEF OF STAFF", text: "compiled daily brief, sent to your inbox" },
-  { agent: "JOBS", text: "tailored CV bullet points for Product Analyst role" },
-  { agent: "CALENDAR", text: "declined a meeting invite that conflicts with focus block" },
 ];
 
 const QUEUE_SEED: QueueItem[] = [
@@ -256,58 +236,141 @@ export function initDashboard(): () => void {
   };
   window.addEventListener("resize", resizeHandler);
 
-  /* ---------- APPROVALS ---------- */
-  const approvalsData: ApprovalItem[] = [...APPROVALS_SEED];
+  /* ---------- LIVE DATA (approvals + run log) ---------- */
+  // Rows come from the DB (agent- and user-written text), so everything here
+  // is rendered with textContent, never innerHTML.
   const approvalsList = document.getElementById("approvalsList")!;
   const approvalCount = document.getElementById("approvalCount")!;
+  const logFeed = document.getElementById("logFeed")!;
 
-  function renderApprovals(): void {
-    approvalsList.innerHTML = "";
-    approvalsData.forEach((a, idx) => {
-      const item = document.createElement("div");
-      item.className = "approval-item";
-      item.innerHTML = `
-        <span class="approval-tag">${a.tag}</span>
-        <div class="approval-body">
-          <p class="title">${a.title}</p>
-          <p class="sub">${a.sub}</p>
-          <div class="approval-actions">
-            <button class="btn approve">Approve</button>
-            <button class="btn skip">Skip</button>
-          </div>
-        </div>`;
-      item.querySelectorAll(".btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          item.classList.add("gone");
-          setTimeout(() => {
-            approvalsData.splice(idx, 1);
-            renderApprovals();
-          }, 280);
-        });
+  function el(tag: string, className: string, text?: string): HTMLElement {
+    const node = document.createElement(tag);
+    node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function showNotice(message: string, askForToken: boolean): void {
+    approvalCount.textContent = "offline";
+    approvalsList.replaceChildren();
+    const body = el("div", "approval-body");
+    body.appendChild(el("p", "sub", message));
+    if (askForToken) {
+      const form = document.createElement("form");
+      form.className = "approval-actions";
+      const input = document.createElement("input");
+      input.type = "password";
+      input.className = "token-input";
+      input.placeholder = "Dashboard token";
+      input.autocomplete = "off";
+      const save = el("button", "btn approve", "Save");
+      form.append(input, save);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        setToken(input.value.trim());
+        void refresh();
       });
+      body.appendChild(form);
+    }
+    const item = el("div", "approval-item");
+    item.appendChild(body);
+    approvalsList.appendChild(item);
+  }
+
+  function renderApprovals(approvals: Approval[]): void {
+    approvalCount.textContent = approvals.length + " pending";
+    approvalsList.replaceChildren();
+    if (approvals.length === 0) {
+      const item = el("div", "approval-item");
+      item.appendChild(el("p", "sub", "Nothing waiting on you."));
+      approvalsList.appendChild(item);
+      return;
+    }
+    approvals.forEach((a) => {
+      const item = el("div", "approval-item");
+      item.appendChild(el("span", "approval-tag", (a.agent ?? "system").toUpperCase()));
+      const body = el("div", "approval-body");
+      body.appendChild(el("p", "title", a.title));
+      if (a.detail) body.appendChild(el("p", "sub detail", a.detail));
+      const actions = el("div", "approval-actions");
+      (["approve", "skip"] as const).forEach((decision) => {
+        const btn = el("button", `btn ${decision}`, decision === "approve" ? "Approve" : "Skip");
+        btn.addEventListener("click", () => {
+          actions.querySelectorAll("button").forEach((b) => ((b as HTMLButtonElement).disabled = true));
+          resolveApproval(a.id, decision)
+            .then(() => item.classList.add("gone"))
+            // 409 = already resolved elsewhere; the refresh below shows the truth.
+            .catch((err: unknown) => console.error("resolve failed", err))
+            .finally(() => void refresh());
+        });
+        actions.appendChild(btn);
+      });
+      body.appendChild(actions);
+      item.appendChild(body);
       approvalsList.appendChild(item);
     });
-    approvalCount.textContent = approvalsData.length + " pending";
   }
-  renderApprovals();
 
-  /* ---------- RUN LOG ---------- */
-  const logFeed = document.getElementById("logFeed")!;
-  logFeed.innerHTML = "";
-  function addLogLine(): void {
-    const item = LOG_POOL[Math.floor(Math.random() * LOG_POOL.length)];
-    const d = new Date();
-    const line = document.createElement("div");
-    line.className = "log-line";
-    line.innerHTML = `<span class="t">${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}</span><span class="agent">${item.agent}</span> — ${item.text}`;
-    logFeed.appendChild(line);
-    logFeed.scrollTop = logFeed.scrollHeight;
-    while (logFeed.children.length > 40) {
-      logFeed.removeChild(logFeed.firstChild!);
+  function describeQuery(q: ResearchQuery): string {
+    switch (q.status) {
+      case "sent":
+        return `searched "${q.query}" — ${q.result_count ?? 0} results`;
+      case "approved_sent":
+        return `approved, searched "${q.query}" — ${q.result_count ?? 0} results`;
+      case "pending_approval":
+        return `held for approval (${q.pii_flags.join(", ")}): "${q.query}"`;
+      case "skipped":
+        return `skipped by you, never sent: "${q.query}"`;
+      case "failed":
+        return `failed: ${q.error ?? "unknown error"}`;
     }
   }
-  for (let i = 0; i < 8; i++) addLogLine();
-  timers.push(setInterval(addLogLine, 2600));
+
+  let lastLogKey = "";
+  function renderLog(queries: ResearchQuery[]): void {
+    // Skip the re-render (and its fade-in) when nothing changed since the last poll.
+    const key = queries.map((q) => `${q.id}:${q.status}`).join(",");
+    if (key === lastLogKey) return;
+    lastLogKey = key;
+    logFeed.replaceChildren();
+    // api returns newest first; the feed reads oldest to newest.
+    [...queries].reverse().forEach((q) => {
+      const d = new Date(q.created_at);
+      const line = el("div", "log-line");
+      line.appendChild(el("span", "t", `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`));
+      line.appendChild(el("span", "agent", (q.agent ?? "research").toUpperCase()));
+      line.appendChild(document.createTextNode(" — " + describeQuery(q)));
+      logFeed.appendChild(line);
+    });
+    if (queries.length === 0) logFeed.appendChild(el("div", "log-line", "No research queries yet."));
+    logFeed.scrollTop = logFeed.scrollHeight;
+  }
+
+  let refreshing = false;
+  async function refresh(): Promise<void> {
+    if (refreshing || cancelled) return;
+    refreshing = true;
+    try {
+      if (!getToken()) {
+        showNotice("Enter the dashboard token to load live data.", true);
+        return;
+      }
+      const [approvals, queries] = await Promise.all([fetchPendingApprovals(), fetchResearchQueries()]);
+      if (cancelled) return;
+      renderApprovals(approvals);
+      renderLog(queries);
+    } catch (err) {
+      if (cancelled) return;
+      const status = err instanceof ApiError ? err.status : 0;
+      if (status === 401) showNotice("Token rejected. Enter it again.", true);
+      else if (status === 0) showNotice("Can't reach the api. Retrying…", false);
+      else showNotice(err instanceof Error ? err.message : "Unexpected error", false);
+    } finally {
+      refreshing = false;
+    }
+  }
+  void refresh();
+  timers.push(setInterval(() => void refresh(), POLL_INTERVAL_MS));
 
   /* ---------- TASK QUEUE ---------- */
   const queueList = document.getElementById("queueList")!;
