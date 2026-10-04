@@ -102,6 +102,29 @@ CREATE TABLE study_sessions (
   created_at TIMESTAMP DEFAULT now()
 );
 
+CREATE TABLE personal_terms (        -- Research PII guard: terms that must never leave in a query
+  id SERIAL PRIMARY KEY,
+  term TEXT NOT NULL UNIQUE,
+  category TEXT NOT NULL DEFAULT 'other',  -- name / address / employer / account / other
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE research_queries (      -- audit log of every Research call, sent or not
+  id SERIAL PRIMARY KEY,
+  agent_id INT REFERENCES agents(id),
+  query TEXT NOT NULL,
+  purpose TEXT,
+  pii_flags TEXT[] NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'sent',     -- sent / pending_approval / approved_sent / skipped / failed
+  approval_id INT REFERENCES approvals(id),
+  result_count INT,
+  answer_preview TEXT,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
 -- pgvector tables added per-agent as needed (study notes, CV/JD embeddings)
 ```
 
@@ -128,10 +151,12 @@ Work through phases in order. Each phase has a "definition of done" — do not m
 
 Bonus (beyond this phase's checklist): `frontend` deployed to S3 + CloudFront (see `infra/aws-resources.md`). `api` still only reachable via its ECS task's public IP (no ALB yet — deferred, costs ~$16-17/mo after the 12-month free tier).
 
-### Phase 2 — Research agent (internal tool)
-- [x] **[ASK USER]** which search API to use — Tavily (decided 2026-09-16); key lives in `.env` locally as `TAVILY_API_KEY`, Secrets Manager in prod
-- [ ] Implement as a callable tool inside the `agent` orchestrator, not a standalone user-facing agent
-- **Done when:** another agent (test with a stub) can call Research and get back structured results.
+### Phase 2 — Research agent (internal tool) ✅ done
+- [x] **[ASK USER]** which search API to use — Tavily (decided 2026-09-16); key lives in `.env` locally as `TAVILY_API_KEY`, Secrets Manager in prod (`friday/tavily/api-key`)
+- [x] Implement as a callable tool inside the `agent` orchestrator, not a standalone user-facing agent — `agent/src/graph.py` (LangGraph node) → `agent/src/research/service.py` → `agent/src/tools/research.py`; PII guard (`agent/src/tools/pii_guard.py` + `personal_terms` table) parks suspicious queries as a pending approval instead of sending them
+- **Done when:** another agent (test with a stub) can call Research and get back structured results. — verified 2026-09-23 with stubbed search/store tests, a real Tavily call locally, and the ECS agent task (task def rev 4) reaching RDS + Tavily key in prod.
+
+Not in this phase: dashboard approve endpoint for parked research queries (api), and wiring `ResearchService` into `agent/src/main.py` once a calling agent exists.
 
 ### Phase 3 — Calendar agent
 - [ ] **[ASK USER]** for iCloud app-specific password before implementing — do not attempt with the primary Apple ID password
