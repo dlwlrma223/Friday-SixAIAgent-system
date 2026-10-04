@@ -16,7 +16,7 @@ ANSWER_PREVIEW_CHARS = 200
 
 @dataclass(frozen=True)
 class ResearchOutcome:
-    status: Literal["sent", "pending_approval", "failed"]
+    status: Literal["sent", "pending_approval", "failed", "skipped"]
     log_id: int
     response: ResearchResponse | None = None
     approval_id: int | None = None
@@ -56,6 +56,21 @@ class ResearchService:
         if self._store.approval_status(log["approval_id"]) != "approved":
             raise PermissionError(f"approval {log['approval_id']} is not approved")
         return self._send(log_id, log["query"], final_status="approved_sent")
+
+    def process_resolved(self) -> list[ResearchOutcome]:
+        """Act on every parked query the user has decided on. Safe to call any time:
+        the DB decides what is due, so a missed Redis message only delays this."""
+        outcomes: list[ResearchOutcome] = []
+        with self._store.sweep_lock() as locked:
+            if not locked:
+                return outcomes
+            for log_id, decision in self._store.list_resolved_parked():
+                if decision == "approved":
+                    outcomes.append(self.resume_approved(log_id))
+                else:
+                    self._store.mark_skipped(log_id)
+                    outcomes.append(ResearchOutcome("skipped", log_id))
+        return outcomes
 
     def _send(self, log_id: int, query: str, *, final_status: str) -> ResearchOutcome:
         try:

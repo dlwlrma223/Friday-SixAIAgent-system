@@ -1,6 +1,8 @@
 """Persistence for the Research audit trail (research_queries, approvals)."""
 
-from typing import Protocol
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import ContextManager, Protocol
 
 from psycopg_pool import ConnectionPool
 
@@ -27,6 +29,16 @@ class ResearchStore(Protocol):
     def mark_failed(self, log_id: int, error: str) -> None: ...
 
     def get_log(self, log_id: int) -> dict | None: ...
+
+    def mark_skipped(self, log_id: int) -> None: ...
+
+    def list_resolved_parked(self) -> list[tuple[int, str]]: ...
+
+    def sweep_lock(self) -> ContextManager[bool]: ...
+
+
+# Arbitrary constant; only has to be the same in every agent task.
+SWEEP_LOCK_KEY = 20260902
 
 
 class PostgresResearchStore:
@@ -116,3 +128,40 @@ class PostgresResearchStore:
             return None
         keys = ("id", "agent_name", "query", "purpose", "status", "approval_id")
         return dict(zip(keys, row))
+
+    def mark_skipped(self, log_id: int) -> None:
+        with self._pool.connection() as conn:
+            conn.execute(
+                """
+                UPDATE research_queries SET status = 'skipped', completed_at = now()
+                WHERE id = %s AND status = 'pending_approval'
+                """,
+                (log_id,),
+            )
+
+    def list_resolved_parked(self) -> list[tuple[int, str]]:
+        """Parked queries whose approval has been decided: (log_id, approved|skipped)."""
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT rq.id, ap.status
+                FROM research_queries rq
+                JOIN approvals ap ON ap.id = rq.approval_id
+                WHERE rq.status = 'pending_approval' AND ap.status IN ('approved', 'skipped')
+                ORDER BY rq.id
+                """
+            ).fetchall()
+        return [(int(r[0]), str(r[1])) for r in rows]
+
+    @contextmanager
+    def sweep_lock(self) -> Iterator[bool]:
+        """Yield True if this task holds the sweep lock. Stops two agent tasks
+        (e.g. during a deploy) from sending the same approved query twice."""
+        with self._pool.connection() as conn:
+            row = conn.execute("SELECT pg_try_advisory_lock(%s)", (SWEEP_LOCK_KEY,)).fetchone()
+            locked = bool(row and row[0])
+            try:
+                yield locked
+            finally:
+                if locked:
+                    conn.execute("SELECT pg_advisory_unlock(%s)", (SWEEP_LOCK_KEY,))
