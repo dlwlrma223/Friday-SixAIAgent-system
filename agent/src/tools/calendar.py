@@ -293,8 +293,8 @@ class CalDavBackend:
             raise RuntimeError("iCloud response was missing an expected address")
         return urljoin(base_url, href)
 
-    def _load(self) -> dict[str, str]:
-        if self._calendars is None:
+    def _load(self, refresh: bool = False) -> dict[str, str]:
+        if self._calendars is None or refresh:
             xml = self._request("PROPFIND", self._url, PRINCIPAL_BODY, depth="0")
             principal = self._href(xml, ".//d:current-user-principal/d:href", self._url)
             xml = self._request("PROPFIND", principal, HOME_BODY, depth="0")
@@ -306,11 +306,15 @@ class CalDavBackend:
     def _calendar_url(self, calendar_name: str) -> str:
         calendars = self._load()
         if calendar_name not in calendars:
+            # It may have been created since the list was cached.
+            calendars = self._load(refresh=True)
+        if calendar_name not in calendars:
             raise KeyError("calendar not found")
         return calendars[calendar_name]
 
     def list_calendars(self) -> list[str]:
-        return sorted(self._load())
+        # Always ask: calendars get added and renamed while the agent runs.
+        return sorted(self._load(refresh=True))
 
     def fetch_ical(self, calendar_name: str, start: datetime, end: datetime) -> list[str]:
         stamp = "%Y%m%dT%H%M%SZ"

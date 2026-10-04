@@ -68,7 +68,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   app.register(dashboardRoutes, { createDbClient, publish, dashboardToken });
-  app.register(calendarRoutes, { createDbClient, dashboardToken });
+  app.register(calendarRoutes, { createDbClient, publish, dashboardToken });
 
   return app;
 }

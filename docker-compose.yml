@@ -70,6 +70,14 @@ services:
       DB_SSL: disable
       # Read from .env; empty means Research tool refuses to start, nothing else breaks.
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      # LLM for drafting events from a sentence. Any OpenAI-compatible provider.
+      # Primary Gemini, fallback Claude Haiku; defaults live in src/tools/llm.py.
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
+      LLM_FALLBACK_BASE_URL: ${LLM_FALLBACK_BASE_URL:-}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
       # iCloud CalDAV. Agent only: the public-facing api never gets these.
       ICLOUD_USERNAME: ${ICLOUD_USERNAME:-}
       ICLOUD_APP_PASSWORD: ${ICLOUD_APP_PASSWORD:-}

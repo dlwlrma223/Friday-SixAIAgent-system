@@ -22,6 +22,9 @@ Health check: `GET http://localhost:3001/health`
 | GET | `/research/queries?limit=20` | Research agent 最近的查詢紀錄（limit 1–100） |
 | POST | `/approvals/:id/approve` | 批准；只有 pending 的才會變，重複按回 409 |
 | POST | `/approvals/:id/skip` | 略過 |
+| GET | `/calendar/events` | agent 從 iCloud 同步回來、還沒結束的事件 |
+| GET | `/calendar/intents` | 處理中或最近 10 分鐘內完成的句子和結果 |
+| POST | `/calendar/intents` | 送一句話給 Calendar agent，body 是 `{"text": "..."}`（1–500 字，每分鐘最多 10 次） |
 
 approve / skip 寫完 DB 之後，會往 Redis channel `friday:approvals` 發
 `{"approval_id":2,"status":"approved"}` 通知 agent。DB 才是準則，Redis 只是提醒：
@@ -30,6 +33,10 @@ Redis 掛掉時批准仍然成立，回應裡 `notified` 會是 `false`。
 ```
 curl -H "Authorization: Bearer $DASHBOARD_TOKEN" http://localhost:3001/approvals
 ```
+
+`POST /calendar/intents` 只把句子存進 `calendar_intents` 並往 Redis channel
+`friday:calendar` 發提醒，回 202。api **不呼叫 LLM、不碰 iCloud，也沒有這兩者的 key**：
+agent 把句子變成事件草稿並建立待批准項目，批准後才由 agent 寫進 iCloud。
 
 ## Database migrations
 

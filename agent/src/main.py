@@ -9,7 +9,13 @@ from src.calendar_agent.store import PostgresCalendarStore
 from src.db import build_pool
 from src.research.service import ResearchService
 from src.research.store import PostgresResearchStore
-from src.tools.calendar import CalendarError, build_calendar_tool
+from src.tools.calendar import CalendarError, build_calendar_tool, calendar_timezone
+from src.tools.llm import (
+    DEFAULT_FALLBACK_MODEL,
+    DEFAULT_MODEL,
+    LLMError,
+    build_llm_client,
+)
 from src.tools.research import ResearchError, build_research_tool
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -21,8 +27,12 @@ REDIS_AUTH_TOKEN = os.environ.get("REDIS_AUTH_TOKEN")
 HEARTBEAT_INTERVAL_SECONDS = 5
 # api publishes here after an approve/skip. Only a nudge: the DB is the truth.
 APPROVALS_CHANNEL = "friday:approvals"
+# api publishes here when I type a sentence for the calendar agent.
+CALENDAR_CHANNEL = "friday:calendar"
 # Fallback sweep, in case a message was published while we were not listening.
 SWEEP_INTERVAL_SECONDS = 60
+# (key variable, model variable) for the primary and the fallback provider.
+LLM_SLOTS = (("LLM_API_KEY", "LLM_MODEL"), ("LLM_FALLBACK_API_KEY", "LLM_FALLBACK_MODEL"))
 
 
 def startup_checks() -> None:
@@ -36,6 +46,13 @@ def startup_checks() -> None:
     logger.info("tavily: %s", "configured" if os.environ.get("TAVILY_API_KEY") else "missing")
     icloud = os.environ.get("ICLOUD_USERNAME") and os.environ.get("ICLOUD_APP_PASSWORD")
     logger.info("icloud: %s", "configured" if icloud else "missing")
+    # Model names are not secret; logging them shows which AI is in use.
+    models = [
+        os.environ.get(model) or default
+        for (key, model), default in zip(LLM_SLOTS, (DEFAULT_MODEL, DEFAULT_FALLBACK_MODEL))
+        if os.environ.get(key)
+    ]
+    logger.info("llm: %s", " -> ".join(models) if models else "missing")
 
 
 def build_research_service() -> ResearchService | None:
@@ -50,11 +67,19 @@ def build_research_service() -> ResearchService | None:
 def build_calendar_service() -> CalendarService | None:
     """None when iCloud isn't configured; everything else keeps running."""
     try:
-        store = PostgresCalendarStore(build_pool(max_size=2))
-        return CalendarService(build_calendar_tool(), store, load_settings())
+        # Before the pool: without credentials there is nothing to connect for.
+        tool = build_calendar_tool()
     except CalendarError as exc:
         logger.error("calendar disabled: %s", exc)
         return None
+    try:
+        llm = build_llm_client()
+    except LLMError as exc:
+        # Sync and approved writes still work; typed sentences get a clear failure.
+        logger.error("calendar drafting disabled: %s", exc)
+        llm = None
+    store = PostgresCalendarStore(build_pool(max_size=2))
+    return CalendarService(tool, store, load_settings(), llm=llm, tz=calendar_timezone())
 
 
 def sync_calendar(service: CalendarService) -> None:
@@ -67,6 +92,22 @@ def sync_calendar(service: CalendarService) -> None:
         logger.error("calendar sync failed: %s", exc)
     except Exception as exc:  # DB problem etc; class name only, to be safe
         logger.error("calendar sync failed: %s", exc.__class__.__name__)
+
+
+def process_calendar_requests(service: CalendarService) -> bool:
+    """Draft requests from typed sentences, write approved events to iCloud,
+    close skipped ones. Never raises. Returns True if something was written,
+    so the caller can re-sync."""
+    try:
+        for drafted in service.process_intents():
+            logger.info("calendar intent %s -> %s", drafted.intent_id, drafted.status)
+        outcomes = service.process_resolved()
+    except Exception as exc:
+        logger.error("calendar request sweep failed: %s", exc.__class__.__name__)
+        return False
+    for outcome in outcomes:
+        logger.info("calendar request %s -> %s", outcome.request_id, outcome.status)
+    return any(o.status == "written" for o in outcomes)
 
 
 def process_approvals(service: ResearchService) -> None:
@@ -96,7 +137,7 @@ def main() -> None:
         try:
             if pubsub is None:
                 pubsub = client.pubsub(ignore_subscribe_messages=True)
-                pubsub.subscribe(APPROVALS_CHANNEL)
+                pubsub.subscribe(APPROVALS_CHANNEL, CALENDAR_CHANNEL)
                 # Anything published before this point was missed; sweep now.
                 next_sweep = 0.0
             # Doubles as the sleep between heartbeats; returns early on a message.
@@ -108,8 +149,12 @@ def main() -> None:
             pubsub = None
             time.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
-        if service and (nudged or time.monotonic() >= next_sweep):
-            process_approvals(service)
+        if nudged or time.monotonic() >= next_sweep:
+            if service:
+                process_approvals(service)
+            if calendar and process_calendar_requests(calendar):
+                # Show the new event on the dashboard right away.
+                next_calendar_sync = 0.0
             next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
 
         if calendar and time.monotonic() >= next_calendar_sync:
