@@ -11,6 +11,26 @@ npm run dev
 
 Health check: `GET http://localhost:3001/health`
 
+## Dashboard endpoints
+
+全部都要帶 `Authorization: Bearer <DASHBOARD_TOKEN>`。伺服器沒設 `DASHBOARD_TOKEN`
+時一律回 503（fail closed），因為 prod 的 api 是公開可連的。
+
+| Method | Path | 作用 |
+|---|---|---|
+| GET | `/approvals?status=pending` | 列出待批准項目（status 可填 pending / approved / skipped） |
+| GET | `/research/queries?limit=20` | Research agent 最近的查詢紀錄（limit 1–100） |
+| POST | `/approvals/:id/approve` | 批准；只有 pending 的才會變，重複按回 409 |
+| POST | `/approvals/:id/skip` | 略過 |
+
+approve / skip 寫完 DB 之後，會往 Redis channel `friday:approvals` 發
+`{"approval_id":2,"status":"approved"}` 通知 agent。DB 才是準則，Redis 只是提醒：
+Redis 掛掉時批准仍然成立，回應裡 `notified` 會是 `false`。
+
+```
+curl -H "Authorization: Bearer $DASHBOARD_TOKEN" http://localhost:3001/approvals
+```
+
 ## Database migrations
 
 Schema 用 `migrations/` 底下的編號 SQL 檔管理（`0001_xxx.sql`、`0002_xxx.sql`…），
@@ -35,7 +55,7 @@ npm run typecheck
 單元/整合測試用 Node.js 內建的 test runner（`node --test`）+ `tsx` 直接跑
 TypeScript，不另外引入 vitest/jest 這類工具鏈，理由：
 
-- 這個服務目前只有兩個 endpoint，用內建 test runner 已經夠用，不需要多一層
+- 這個服務的 endpoint 不多，用內建 test runner 已經夠用，不需要多一層
   esbuild/vite 依賴。
 - `/db-check` 依賴外部的 RDS，測試用依賴注入（`buildApp({ createDbClient })`）
   換成假的 client 物件來驗證錯誤處理分支（連線逾時、查詢失敗、收尾失敗），

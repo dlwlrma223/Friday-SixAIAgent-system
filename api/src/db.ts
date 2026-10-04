@@ -58,3 +58,18 @@ export function readRdsCaBundle(): string | undefined {
 export function createDbClientFromEnv(): DbClientLike {
   return new Client(buildDbConfigFromEnv(process.env, readRdsCaBundle()));
 }
+
+// Open a connection, run fn, always clean up. Throws on any DB failure.
+export async function withDb<T>(
+  createDbClient: () => DbClientLike,
+  fn: (db: DbClientLike) => Promise<T>,
+): Promise<T> {
+  const client = createDbClient();
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    // An end() failure must not mask the real result or error.
+    await client.end().catch(() => {});
+  }
+}

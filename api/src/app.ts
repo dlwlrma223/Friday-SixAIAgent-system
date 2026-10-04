@@ -1,7 +1,9 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import { dashboardRoutes } from "./dashboard.js";
 import { createDbClientFromEnv, type DbClientLike } from "./db.js";
+import { createRedisPublisherFromEnv, type Publish } from "./pubsub.js";
 
 // Re-exported so existing tests keep importing from app.js.
 export { buildDbConfigFromEnv, type DbClientLike, type DbConnectionConfig } from "./db.js";
@@ -9,12 +11,17 @@ export { buildDbConfigFromEnv, type DbClientLike, type DbConnectionConfig } from
 export interface BuildAppOptions {
   // Lets tests inject a fake DB client instead of a real pg.Client.
   createDbClient?: () => DbClientLike;
+  // Lets tests capture Redis messages instead of needing a real Redis.
+  publish?: Publish;
+  dashboardToken?: string;
 }
 
 // Split out from index.ts so tests can use Fastify's inject() without
 // binding a real port or triggering a real DB connection on import.
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const createDbClient = options.createDbClient ?? createDbClientFromEnv;
+  const publish = options.publish ?? createRedisPublisherFromEnv();
+  const dashboardToken = options.dashboardToken ?? process.env.DASHBOARD_TOKEN;
   const app = Fastify({ logger: true });
 
   // Allowlist instead of origin:true — once we add mutating endpoints
@@ -58,6 +65,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       }
     }
   });
+
+  app.register(dashboardRoutes, { createDbClient, publish, dashboardToken });
 
   return app;
 }
