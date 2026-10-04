@@ -44,6 +44,8 @@ services:
       REDIS_URL: redis://redis:6379
       # Must match the origin the browser sends when hitting api (frontend's mapped port).
       CORS_ORIGIN: http://localhost:${FRONTEND_PORT:-8080}
+      # Read from .env; empty means the dashboard routes answer 503 (fail closed).
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:-}
     ports:
       - "${API_PORT:-3001}:3001"
     volumes:
