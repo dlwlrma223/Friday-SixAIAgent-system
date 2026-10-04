@@ -1,11 +1,14 @@
 import {
   ApiError,
+  fetchCalendarIntents,
   fetchPendingApprovals,
   fetchResearchQueries,
   getToken,
+  sendCalendarIntent,
   resolveApproval,
   setToken,
   type Approval,
+  type CalendarIntent,
   type ResearchQuery,
 } from "../api";
 
@@ -346,6 +349,54 @@ export function initDashboard(): () => void {
     logFeed.scrollTop = logFeed.scrollHeight;
   }
 
+  /* ---------- ASK THE CALENDAR AGENT ---------- */
+  const askForm = document.getElementById("askForm") as HTMLFormElement;
+  const askInput = document.getElementById("askInput") as HTMLInputElement;
+  const askHistory = document.getElementById("askHistory")!;
+  const ASK_STATE: Record<CalendarIntent["status"], string> = {
+    pending: "… thinking",
+    drafted: "✓ drafted — approve it above",
+    failed: "✕ not drafted",
+  };
+
+  let lastAskKey: string | null = null;
+  function renderIntents(intents: CalendarIntent[]): void {
+    const key = intents.map((i) => `${i.id}:${i.status}`).join(",");
+    if (key === lastAskKey) return;
+    lastAskKey = key;
+    askHistory.replaceChildren();
+    intents.forEach((intent) => {
+      const line = el("div", `ask-line ${intent.status}`);
+      line.appendChild(el("span", "state", ASK_STATE[intent.status]));
+      line.appendChild(document.createTextNode(intent.text));
+      if (intent.status === "failed" && intent.error) line.appendChild(el("span", "why", intent.error));
+      askHistory.appendChild(line);
+    });
+  }
+
+  const onAskSubmit = (event: Event): void => {
+    event.preventDefault();
+    const text = askInput.value.trim();
+    if (!text) return;
+    const submit = askForm.querySelector("button") as HTMLButtonElement;
+    submit.disabled = true;
+    sendCalendarIntent(text)
+      .then(() => {
+        askInput.value = "";
+        void refresh();
+      })
+      .catch((err: unknown) => {
+        // Show the failure in place; the sentence stays in the box to retry.
+        const line = el("div", "ask-line failed");
+        line.appendChild(el("span", "state", "✕ not sent"));
+        line.appendChild(document.createTextNode(err instanceof Error ? err.message : "Request failed"));
+        askHistory.prepend(line);
+        lastAskKey = null;
+      })
+      .finally(() => (submit.disabled = false));
+  };
+  askForm.addEventListener("submit", onAskSubmit);
+
   let refreshing = false;
   async function refresh(): Promise<void> {
     if (refreshing || cancelled) return;
@@ -355,10 +406,15 @@ export function initDashboard(): () => void {
         showNotice("Enter the dashboard token to load live data.", true);
         return;
       }
-      const [approvals, queries] = await Promise.all([fetchPendingApprovals(), fetchResearchQueries()]);
+      const [approvals, queries, intents] = await Promise.all([
+        fetchPendingApprovals(),
+        fetchResearchQueries(),
+        fetchCalendarIntents(),
+      ]);
       if (cancelled) return;
       renderApprovals(approvals);
       renderLog(queries);
+      renderIntents(intents);
     } catch (err) {
       if (cancelled) return;
       const status = err instanceof ApiError ? err.status : 0;
@@ -425,6 +481,7 @@ export function initDashboard(): () => void {
       clearTimeout(id);
     });
     window.removeEventListener("resize", resizeHandler);
+    askForm.removeEventListener("submit", onAskSubmit);
     fieldWrap.querySelectorAll(".field-label").forEach((el) => el.remove());
   };
 }

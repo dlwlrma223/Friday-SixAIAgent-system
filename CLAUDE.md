@@ -125,6 +125,47 @@ CREATE TABLE research_queries (      -- audit log of every Research call, sent o
   completed_at TIMESTAMPTZ
 );
 
+CREATE TABLE calendar_events (       -- local mirror of upcoming iCloud events, refreshed by the agent
+  id SERIAL PRIMARY KEY,
+  uid TEXT NOT NULL,
+  calendar_name TEXT NOT NULL,
+  title TEXT NOT NULL,
+  starts_at TIMESTAMPTZ NOT NULL,
+  ends_at TIMESTAMPTZ,
+  all_day BOOLEAN NOT NULL DEFAULT false,
+  location TEXT,
+  synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (calendar_name, uid, starts_at)
+);
+
+CREATE TABLE calendar_event_requests ( -- a calendar write waiting for approval
+  id SERIAL PRIMARY KEY,
+  requested_by INT REFERENCES agents(id),  -- which agent asked; NULL = the user directly
+  event_uid TEXT NOT NULL UNIQUE DEFAULT gen_random_uuid()::text,
+  title TEXT NOT NULL,
+  starts_at TIMESTAMPTZ NOT NULL,
+  ends_at TIMESTAMPTZ NOT NULL,
+  all_day BOOLEAN NOT NULL DEFAULT false,
+  location TEXT,
+  notes TEXT,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending_approval',  -- pending_approval / written / skipped / failed
+  approval_id INT REFERENCES approvals(id),
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE calendar_intents (      -- a sentence typed on the dashboard for the calendar agent
+  id SERIAL PRIMARY KEY,
+  text TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending / drafted / failed
+  request_id INT REFERENCES calendar_event_requests(id),
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
 -- pgvector tables added per-agent as needed (study notes, CV/JD embeddings)
 ```
 
@@ -165,11 +206,19 @@ Still open: these routes are not enabled in prod (no `DASHBOARD_TOKEN` secret; t
 
 Handoff docs: `PROJECT_STATE.md` (where things stand) and `HANDOFF.md` (how to pick the work up) live outside this repo in `~/Documents/sidePorject/` (the user keeps them there; not in git) — read both at the start of a new session and update them after each phase.
 
-### Phase 3 — Calendar agent
-- [ ] **[ASK USER]** for iCloud app-specific password before implementing — do not attempt with the primary Apple ID password
-- [ ] CalDAV client in `api` (or `agent`, pick one and be consistent) reads events, writes new events
-- [ ] Dashboard shows upcoming events
-- **Done when:** creating an event via the dashboard shows up in the actual iCloud calendar within a minute.
+### Phase 3 — Calendar agent ✅ done locally (prod not deployed yet)
+- [x] **[ASK USER]** for iCloud app-specific password before implementing — done 2026-10-04; `ICLOUD_USERNAME` / `ICLOUD_APP_PASSWORD` in `.env`, agent only. The user chose their main Apple ID (not a secondary one).
+- [x] CalDAV client reads events, writes new events — lives in **`agent`** (`agent/src/tools/calendar.py`), never in `api`: the api is public-facing and must not hold the iCloud password. Hand-written minimal client on `httpx` (the `caldav` package timed out against iCloud). Credentials are only ever sent to `*.icloud.com` over HTTPS, redirects are not followed, errors and logs are scrubbed.
+- [x] ~~Dashboard shows upcoming events~~ — **dropped by the user (2026-10-04)**: they want AI-driven scheduling, not a calendar view or a manual form. The dashboard instead has one input box: a sentence goes to `POST /calendar/intents`, the agent asks an LLM to turn it into an event draft, and the draft becomes a pending approval. Events are still synced into `calendar_events` every 30 min (next 30 days) so other agents can read the schedule; `GET /calendar/events` exists but nothing on the dashboard uses it.
+- **Done when:** creating an event via the dashboard shows up in the actual iCloud calendar within a minute. — verified locally 2026-10-04: sentence → draft in ~1.5s → Approve → written to iCloud ~1s later, seen on the user's phone.
+
+How it fits together:
+- Read: `agent/src/calendar_agent/service.py` `sync()` → `calendar_events`. `CALENDAR_READ` empty = all calendars; `CALENDAR_SYNC_DAYS=30`, `CALENDAR_SYNC_MINUTES=30`.
+- Write: only for a `calendar_event_requests` row whose approval is `approved` (re-checked in the DB right before the write), and only into the one calendar named by `CALENDAR_WRITE` (`Friday`). `event_uid` is fixed at request time so a retry overwrites instead of duplicating. Any agent may file a request (`requested_by`, `reason`) — that is the path for cross-agent scheduling (e.g. Home asking Calendar to add a rent reminder).
+- LLM (`agent/src/tools/llm.py`, `llm_anthropic.py`, `agent/src/calendar_agent/intent.py`): primary Gemini free tier via its OpenAI-compatible API (`gemini-flash-lite-latest`), optional fallback Claude Haiku 4.5 via the Anthropic SDK (key not set yet). Configured by `LLM_*` / `LLM_FALLBACK_*` in `.env`; a model named `claude-*` uses the Anthropic SDK. Only three lines leave the system per call: local time, timezone, the sentence. The model's answer is validated in code (no past dates, no invented dates, end after start) before anything is filed.
+- Provider decisions (user, 2026-10-04): no DeepSeek (data would go to China); Groq is blocked from the user's network (HTTP 403); Gemini free-tier data may be used by Google for training — accepted for calendar sentences only. Revisit before sending Finance/Home data to any LLM.
+
+Still open: not deployed to prod (needs migrations 0010–0012 on RDS, Secrets Manager entries for iCloud + LLM keys, a new agent task definition). The security review of the Phase 3 diff promised before any prod deploy has not been run yet.
 
 ### Phase 4 — Study agent
 - [ ] `subjects` seeded with the 5 subjects the user gave: English, Japanese, taxi license (的士牌), electrician (電工), AWS SAA

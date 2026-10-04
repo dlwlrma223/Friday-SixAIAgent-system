@@ -21,6 +21,13 @@ export interface ResearchQuery {
   created_at: string;
 }
 
+export interface CalendarIntent {
+  id: number;
+  text: string;
+  status: "pending" | "drafted" | "failed";
+  error: string | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -48,19 +55,22 @@ export function setToken(token: string): void {
   }
 }
 
-async function request<T>(path: string, method: "GET" | "POST" = "GET"): Promise<T> {
+async function request<T>(path: string, method: "GET" | "POST" = "GET", body?: unknown): Promise<T> {
   let res: Response;
   try {
+    const headers: Record<string, string> = { Authorization: `Bearer ${getToken()}` };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
     res = await fetch(`${API_URL}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${getToken()}` },
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, "api unreachable");
   }
-  const body = (await res.json().catch(() => ({}))) as { message?: string };
-  if (!res.ok) throw new ApiError(res.status, body.message ?? `HTTP ${res.status}`);
-  return body as T;
+  const data = (await res.json().catch(() => ({}))) as { message?: string };
+  if (!res.ok) throw new ApiError(res.status, data.message ?? `HTTP ${res.status}`);
+  return data as T;
 }
 
 export async function fetchPendingApprovals(): Promise<Approval[]> {
@@ -73,4 +83,13 @@ export async function fetchResearchQueries(): Promise<ResearchQuery[]> {
 
 export async function resolveApproval(id: number, decision: "approve" | "skip"): Promise<void> {
   await request(`/approvals/${id}/${decision}`, "POST");
+}
+
+export async function fetchCalendarIntents(): Promise<CalendarIntent[]> {
+  return (await request<{ intents: CalendarIntent[] }>("/calendar/intents")).intents;
+}
+
+// Only records the sentence: the agent drafts an event, and that still needs approval.
+export async function sendCalendarIntent(text: string): Promise<void> {
+  await request("/calendar/intents", "POST", { text });
 }

@@ -66,6 +66,24 @@ function DashboardView() {
         </div>
       </div>
 
+      <div className="panel ask-panel">
+        <div className="panel-head">
+          <h2>Tell the Calendar Agent</h2>
+          <span className="count">drafts an event · you approve it above</span>
+        </div>
+        <form className="ask-form" id="askForm" autoComplete="off">
+          <input
+            id="askInput"
+            type="text"
+            maxLength={500}
+            required
+            aria-label="Tell the calendar agent what to schedule"
+          />
+          <button className="btn approve" type="submit">Send</button>
+        </form>
+        <div className="ask-history" id="askHistory"></div>
+      </div>
+
       <div className="bottom-grid">
         <div className="panel">
           <div className="panel-head"><h2>Run Log</h2><span className="count">live</span></div>

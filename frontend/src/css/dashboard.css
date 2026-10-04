@@ -212,6 +212,21 @@ html,body{
 .glance-stat .num small{font-size:12px;color:var(--text-faint);font-weight:400;}
 .glance-stat .lbl{font-size:9.5px;color:var(--text-faint);letter-spacing:0.08em;text-transform:uppercase;margin-top:3px;}
 
+/* ---------- ASK ---------- */
+.ask-panel{margin-bottom:16px;}
+.ask-form{display:flex;gap:8px;padding:12px 16px;}
+.ask-form input{
+  flex:1;min-width:0;background:transparent;border:1px solid var(--line);color:var(--text);
+  font:inherit;font-size:12px;padding:7px 10px;
+}
+.ask-form input:focus{outline:none;border-color:var(--amber-dim);}
+.ask-history{padding:0 16px 12px;font-size:10.5px;line-height:1.8;color:var(--text-dim);}
+.ask-history:empty{display:none;}
+.ask-line .state{margin-right:8px;color:var(--text-faint);}
+.ask-line.drafted .state{color:var(--amber);}
+.ask-line.failed .state,.ask-line.failed .why{color:var(--red);}
+.ask-line .why{display:block;padding-left:14px;}
+
 /* ---------- BOTTOM GRID ---------- */
 .bottom-grid{
   display:grid;
