@@ -5,6 +5,7 @@ import this; they read the `calendar_events` table and ask for writes
 through `calendar_event_requests`, which need approval.
 """
 
+import logging
 import os
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, time, timedelta, timezone
@@ -16,6 +17,10 @@ import recurring_ical_events
 from icalendar import Calendar as ICalendar
 from icalendar import Event as IEvent
 from pydantic import BaseModel, Field, model_validator
+
+# httpx logs every request URL at INFO, and iCloud URLs contain the account id.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 ICLOUD_CALDAV_URL = "https://caldav.icloud.com"
 # iCloud redirects each account to its own pNN-caldav.icloud.com host. Credentials

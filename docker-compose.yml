@@ -73,6 +73,9 @@ services:
       # iCloud CalDAV. Agent only: the public-facing api never gets these.
       ICLOUD_USERNAME: ${ICLOUD_USERNAME:-}
       ICLOUD_APP_PASSWORD: ${ICLOUD_APP_PASSWORD:-}
+      # Empty CALENDAR_READ = every calendar that holds events.
+      CALENDAR_READ: ${CALENDAR_READ:-}
+      CALENDAR_WRITE: ${CALENDAR_WRITE:-Friday}
       CALENDAR_SYNC_DAYS: ${CALENDAR_SYNC_DAYS:-30}
       CALENDAR_SYNC_MINUTES: ${CALENDAR_SYNC_MINUTES:-30}
     volumes:

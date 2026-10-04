@@ -4,9 +4,12 @@ import time
 
 import redis
 
+from src.calendar_agent.service import CalendarService, load_settings
+from src.calendar_agent.store import PostgresCalendarStore
 from src.db import build_pool
 from src.research.service import ResearchService
 from src.research.store import PostgresResearchStore
+from src.tools.calendar import CalendarError, build_calendar_tool
 from src.tools.research import ResearchError, build_research_tool
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -31,6 +34,8 @@ def startup_checks() -> None:
     except Exception as exc:  # keep the heartbeat alive whatever failed
         logger.error("db check failed: %s", exc)
     logger.info("tavily: %s", "configured" if os.environ.get("TAVILY_API_KEY") else "missing")
+    icloud = os.environ.get("ICLOUD_USERNAME") and os.environ.get("ICLOUD_APP_PASSWORD")
+    logger.info("icloud: %s", "configured" if icloud else "missing")
 
 
 def build_research_service() -> ResearchService | None:
@@ -40,6 +45,28 @@ def build_research_service() -> ResearchService | None:
     except ResearchError as exc:
         logger.error("research disabled: %s", exc)
         return None
+
+
+def build_calendar_service() -> CalendarService | None:
+    """None when iCloud isn't configured; everything else keeps running."""
+    try:
+        store = PostgresCalendarStore(build_pool(max_size=2))
+        return CalendarService(build_calendar_tool(), store, load_settings())
+    except CalendarError as exc:
+        logger.error("calendar disabled: %s", exc)
+        return None
+
+
+def sync_calendar(service: CalendarService) -> None:
+    """Refresh the local copy of upcoming events. Never raises."""
+    try:
+        result = service.sync()
+        # Counts only: event titles are personal and stay out of the logs.
+        logger.info("calendar sync ok (events=%s, calendars=%s)", result.events, result.calendars)
+    except CalendarError as exc:  # message is already scrubbed of credentials
+        logger.error("calendar sync failed: %s", exc)
+    except Exception as exc:  # DB problem etc; class name only, to be safe
+        logger.error("calendar sync failed: %s", exc.__class__.__name__)
 
 
 def process_approvals(service: ResearchService) -> None:
@@ -58,6 +85,8 @@ def process_approvals(service: ResearchService) -> None:
 def main() -> None:
     startup_checks()
     service = build_research_service()
+    calendar = build_calendar_service()
+    next_calendar_sync = 0.0
     client = redis.Redis.from_url(REDIS_URL, password=REDIS_AUTH_TOKEN)
     pubsub = None
     next_sweep = 0.0
@@ -82,6 +111,10 @@ def main() -> None:
         if service and (nudged or time.monotonic() >= next_sweep):
             process_approvals(service)
             next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
+
+        if calendar and time.monotonic() >= next_calendar_sync:
+            sync_calendar(calendar)
+            next_calendar_sync = time.monotonic() + calendar.settings.sync_minutes * 60
 
 
 if __name__ == "__main__":
