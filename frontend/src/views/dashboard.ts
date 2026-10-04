@@ -1,15 +1,25 @@
 import {
   ApiError,
+  answerStudyQuestion,
+  fetchStudyMaterials,
+  requestStudyMaterials,
   fetchCalendarIntents,
   fetchPendingApprovals,
   fetchResearchQueries,
+  fetchStudyGoal,
+  fetchStudyGoals,
   getToken,
   sendCalendarIntent,
+  sendStudyGoal,
   resolveApproval,
   setToken,
   type Approval,
   type CalendarIntent,
   type ResearchQuery,
+  type StudyGoalDetail,
+  type StudyMaterials,
+  type StudyModule,
+  type StudyGoalSummary,
 } from "../api";
 
 const POLL_INTERVAL_MS = 4000;
@@ -397,6 +407,333 @@ export function initDashboard(): () => void {
   };
   askForm.addEventListener("submit", onAskSubmit);
 
+  /* ---------- STUDY AGENT ---------- */
+  const studyForm = document.getElementById("studyForm") as HTMLFormElement;
+  const studyInput = document.getElementById("studyInput") as HTMLInputElement;
+  const studyGoals = document.getElementById("studyGoals")!;
+  const STUDY_STATE: Record<StudyGoalSummary["status"], string> = {
+    pending: "… researching",
+    planned: "✓ plan ready",
+    failed: "✕ no plan",
+  };
+  let openGoalId: number | null = null;
+
+  // Sources come from the open web: only ever link to plain http(s) URLs.
+  function safeLink(url: string, label: string): HTMLElement {
+    let ok = false;
+    try {
+      ok = ["http:", "https:"].includes(new URL(url).protocol);
+    } catch {
+      ok = false;
+    }
+    if (!ok) return el("span", "", label);
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = label;
+    return link;
+  }
+
+  function sourceList(sources: Array<{ id: number; title: string; url: string }>): HTMLElement {
+    const box = el("div", "study-sources");
+    box.appendChild(el("p", "heading", "Sources"));
+    sources.forEach((src) => {
+      const line = el("div", "");
+      line.appendChild(document.createTextNode(`[${src.id}] `));
+      line.appendChild(safeLink(src.url, src.title || src.url));
+      box.appendChild(line);
+    });
+    return box;
+  }
+
+  function renderCards(materials: StudyMaterials): HTMLElement {
+    const box = el("div", "study-work");
+    materials.cards.forEach((card) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "study-card";
+      item.appendChild(document.createTextNode(card.front));
+      item.appendChild(el("span", "hint", "click to flip"));
+      item.appendChild(el("span", "back", card.back));
+      item.addEventListener("click", () => item.classList.toggle("open"));
+      box.appendChild(item);
+    });
+    return box;
+  }
+
+  function renderQuiz(materials: StudyMaterials): HTMLElement {
+    const box = el("div", "study-work");
+    const total = materials.questions.length;
+    let index = 0;
+    let score = 0;
+
+    function finish(): void {
+      box.replaceChildren();
+      box.appendChild(el("p", "quiz-score", `Score: ${score} / ${total}`));
+      const again = el("button", "btn approve", "Try again") as HTMLButtonElement;
+      again.type = "button";
+      again.addEventListener("click", () => {
+        index = 0;
+        score = 0;
+        show();
+      });
+      box.appendChild(again);
+      if (materials.module.materials_sources.length > 0) {
+        box.appendChild(sourceList(materials.module.materials_sources));
+      }
+    }
+
+    function show(): void {
+      const q = materials.questions[index];
+      box.replaceChildren();
+      box.appendChild(el("p", "quiz-progress", `Question ${index + 1} of ${total}`));
+      box.appendChild(el("p", "quiz-question", q.question));
+      const feedback = el("div", "");
+      const buttons = q.options.map((option, i) => {
+        const button = el("button", "quiz-option", option) as HTMLButtonElement;
+        button.type = "button";
+        button.addEventListener("click", () => {
+          buttons.forEach((b) => (b.disabled = true));
+          answerStudyQuestion(q.id, i)
+            .then((result) => {
+              if (result.correct) score += 1;
+              buttons[result.correct_index].classList.add("right");
+              if (!result.correct) button.classList.add("wrong");
+              if (result.explanation) feedback.appendChild(el("p", "quiz-explain", result.explanation));
+              const isLast = index === total - 1;
+              const next = el("button", "btn approve", isLast ? "See score" : "Next") as HTMLButtonElement;
+              next.type = "button";
+              next.addEventListener("click", () => {
+                index += 1;
+                if (isLast) finish();
+                else show();
+              });
+              feedback.appendChild(next);
+            })
+            .catch((err: unknown) => {
+              // Nothing was recorded; let me answer again.
+              buttons.forEach((b) => (b.disabled = false));
+              feedback.replaceChildren(el("p", "why", err instanceof Error ? err.message : "Could not check the answer"));
+            });
+        });
+        box.appendChild(button);
+        return button;
+      });
+      box.appendChild(feedback);
+    }
+
+    show();
+    return box;
+  }
+
+  // Buttons under one module: ask for material, or open what is there.
+  function renderModuleActions(m: StudyModule, reload: () => void): HTMLElement {
+    const wrap = el("div", "");
+    const actions = el("div", "study-actions");
+    wrap.appendChild(actions);
+
+    if (m.materials_status === "pending") {
+      actions.appendChild(el("span", "busy", "… writing cards and questions"));
+      return wrap;
+    }
+    if (m.materials_status === "ready") {
+      const work = el("div", "");
+      let showing: "cards" | "quiz" | null = null;
+      const open = (kind: "cards" | "quiz"): void => {
+        if (showing === kind) {
+          showing = null;
+          work.replaceChildren();
+          return;
+        }
+        showing = kind;
+        work.replaceChildren(el("p", "busy", "Loading…"));
+        fetchStudyMaterials(m.id)
+          .then((materials) => {
+            if (showing !== kind) return;
+            work.replaceChildren(kind === "cards" ? renderCards(materials) : renderQuiz(materials));
+          })
+          .catch((err: unknown) => {
+            work.replaceChildren(el("p", "why", err instanceof Error ? err.message : "Could not load"));
+          });
+      };
+      (["cards", "quiz"] as const).forEach((kind) => {
+        const button = el("button", "btn approve", kind === "cards" ? "Cards" : "Quiz") as HTMLButtonElement;
+        button.type = "button";
+        button.addEventListener("click", () => open(kind));
+        actions.appendChild(button);
+      });
+      // Rewriting replaces this module's cards, questions and recorded answers.
+      const redo = el("button", "btn skip", "Regenerate") as HTMLButtonElement;
+      redo.type = "button";
+      redo.addEventListener("click", () => {
+        redo.disabled = true;
+        requestStudyMaterials(m.id)
+          .then(reload)
+          .catch((err: unknown) => {
+            redo.disabled = false;
+            actions.appendChild(el("span", "why", err instanceof Error ? err.message : "Request failed"));
+          });
+      });
+      actions.appendChild(redo);
+      wrap.appendChild(work);
+      return wrap;
+    }
+
+    const generate = el("button", "btn approve", "Generate cards & quiz") as HTMLButtonElement;
+    generate.type = "button";
+    generate.addEventListener("click", () => {
+      generate.disabled = true;
+      requestStudyMaterials(m.id)
+        .then(reload)
+        .catch((err: unknown) => {
+          generate.disabled = false;
+          actions.appendChild(el("span", "why", err instanceof Error ? err.message : "Request failed"));
+        });
+    });
+    actions.appendChild(generate);
+    if (m.materials_status === "failed" && m.materials_error) {
+      actions.appendChild(el("span", "why", m.materials_error));
+    }
+    return wrap;
+  }
+
+  // The action area of each module, so a status change can redraw just that
+  // module and leave any open cards or quiz in the others alone.
+  type ModuleSlots = Map<number, { status: StudyModule["materials_status"]; node: HTMLElement }>;
+
+  function renderPlan(detail: StudyGoalDetail, reload: () => void, slots: ModuleSlots): HTMLElement {
+    const box = el("div", "study-plan");
+    if (detail.goal.overview) box.appendChild(el("p", "overview", detail.goal.overview));
+
+    if (detail.goal.facts.length > 0) {
+      const facts = el("div", "study-facts");
+      detail.goal.facts.forEach((f) => {
+        const fact = el("div", "");
+        fact.appendChild(el("span", "label", f.label));
+        fact.appendChild(el("span", "value", f.value));
+        facts.appendChild(fact);
+      });
+      box.appendChild(facts);
+    }
+
+    detail.modules.forEach((m) => {
+      const module = el("div", "study-module");
+      const head = el("div", "");
+      const hours = m.est_hours === null ? "" : ` · ${Number(m.est_hours)}h`;
+      head.appendChild(el("span", "when", `WEEK ${m.week ?? "?"}${hours}`));
+      head.appendChild(el("span", "title", `${m.position}. ${m.title}`));
+      module.appendChild(head);
+      if (m.summary) module.appendChild(el("p", "", m.summary));
+      if (m.topics.length > 0) {
+        const list = el("ul", "topics");
+        m.topics.forEach((t) => list.appendChild(el("li", "", t)));
+        module.appendChild(list);
+      }
+      if (m.source_ids.length > 0) {
+        module.appendChild(el("p", "cites", "Sources: " + m.source_ids.map((i) => `[${i}]`).join(" ")));
+      }
+      const actions = renderModuleActions(m, reload);
+      slots.set(m.id, { status: m.materials_status, node: actions });
+      module.appendChild(actions);
+      box.appendChild(module);
+    });
+
+    if (detail.goal.sources.length > 0) box.appendChild(sourceList(detail.goal.sources));
+    box.appendChild(
+      el("p", "study-note", "Written by AI from the sources above. Check exam details against the official site."),
+    );
+    return box;
+  }
+
+  let lastStudyKey: string | null = null;
+  function renderStudyGoals(goals: StudyGoalSummary[]): void {
+    const key = goals.map((g) => `${g.id}:${g.status}`).join(",") + `|${openGoalId}`;
+    if (key === lastStudyKey) return;
+    lastStudyKey = key;
+    studyGoals.replaceChildren();
+    goals.forEach((goal) => {
+      const row = el("div", `study-goal ${goal.status}`);
+      const head = document.createElement("button");
+      head.type = "button";
+      head.className = "study-goal-head";
+      head.disabled = goal.status !== "planned";
+      head.appendChild(el("span", "state", STUDY_STATE[goal.status]));
+      head.appendChild(el("span", "name", goal.title ?? goal.request_text));
+      if (goal.status === "planned") {
+        head.appendChild(el("span", "meta", `${goal.modules} modules · ${goal.total_weeks ?? "?"} weeks`));
+      }
+      row.appendChild(head);
+      if (goal.status === "failed" && goal.error) row.appendChild(el("p", "why", goal.error));
+
+      head.addEventListener("click", () => {
+        openGoalId = openGoalId === goal.id ? null : goal.id;
+        renderStudyGoals(goals);
+      });
+      if (openGoalId === goal.id && goal.status === "planned") {
+        const holder = el("div", "study-plan", "Loading…");
+        row.appendChild(holder);
+        const slots: ModuleSlots = new Map();
+        let drawn = false;
+        let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const load = (): void => {
+          if (cancelled || openGoalId !== goal.id) return;
+          // Once drawn, stop if this row has been replaced by a newer render.
+          if (drawn && !row.isConnected) return;
+          fetchStudyGoal(goal.id)
+            .then((detail) => {
+              if (!drawn) {
+                holder.replaceWith(renderPlan(detail, load, slots));
+                drawn = true;
+              } else {
+                // Redraw only the modules whose status changed.
+                detail.modules.forEach((m) => {
+                  const slot = slots.get(m.id);
+                  if (!slot || slot.status === m.materials_status) return;
+                  const fresh = renderModuleActions(m, load);
+                  slot.node.replaceWith(fresh);
+                  slots.set(m.id, { status: m.materials_status, node: fresh });
+                });
+              }
+              // While the agent is writing material, check back until it is done.
+              clearTimeout(pollTimer);
+              if (detail.modules.some((m) => m.materials_status === "pending")) {
+                pollTimer = setTimeout(load, POLL_INTERVAL_MS);
+                timers.push(pollTimer);
+              }
+            })
+            .catch((err: unknown) => {
+              if (!drawn) holder.textContent = err instanceof Error ? err.message : "Could not load the plan";
+            });
+        };
+        load();
+      }
+      studyGoals.appendChild(row);
+    });
+  }
+
+  const onStudySubmit = (event: Event): void => {
+    event.preventDefault();
+    const text = studyInput.value.trim();
+    if (!text) return;
+    const submit = studyForm.querySelector("button") as HTMLButtonElement;
+    submit.disabled = true;
+    sendStudyGoal(text)
+      .then(() => {
+        studyInput.value = "";
+        void refresh();
+      })
+      .catch((err: unknown) => {
+        const row = el("div", "study-goal failed");
+        row.appendChild(el("p", "why", err instanceof Error ? err.message : "Request failed"));
+        studyGoals.prepend(row);
+        lastStudyKey = null;
+      })
+      .finally(() => (submit.disabled = false));
+  };
+  studyForm.addEventListener("submit", onStudySubmit);
+
   let refreshing = false;
   async function refresh(): Promise<void> {
     if (refreshing || cancelled) return;
@@ -406,15 +743,17 @@ export function initDashboard(): () => void {
         showNotice("Enter the dashboard token to load live data.", true);
         return;
       }
-      const [approvals, queries, intents] = await Promise.all([
+      const [approvals, queries, intents, goals] = await Promise.all([
         fetchPendingApprovals(),
         fetchResearchQueries(),
         fetchCalendarIntents(),
+        fetchStudyGoals(),
       ]);
       if (cancelled) return;
       renderApprovals(approvals);
       renderLog(queries);
       renderIntents(intents);
+      renderStudyGoals(goals);
     } catch (err) {
       if (cancelled) return;
       const status = err instanceof ApiError ? err.status : 0;
@@ -482,6 +821,7 @@ export function initDashboard(): () => void {
     });
     window.removeEventListener("resize", resizeHandler);
     askForm.removeEventListener("submit", onAskSubmit);
+    studyForm.removeEventListener("submit", onStudySubmit);
     fieldWrap.querySelectorAll(".field-label").forEach((el) => el.remove());
   };
 }

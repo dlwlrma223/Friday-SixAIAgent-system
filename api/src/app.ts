@@ -5,6 +5,7 @@ import { calendarRoutes } from "./calendar.js";
 import { dashboardRoutes } from "./dashboard.js";
 import { createDbClientFromEnv, type DbClientLike } from "./db.js";
 import { createRedisPublisherFromEnv, type Publish } from "./pubsub.js";
+import { studyRoutes } from "./study.js";
 
 // Re-exported so existing tests keep importing from app.js.
 export { buildDbConfigFromEnv, type DbClientLike, type DbConnectionConfig } from "./db.js";
@@ -34,11 +35,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     .map((o) => o.trim())
     .filter(Boolean);
 
-  app.register(cors, { origin: allowedOrigins });
+  // maxAge lets the browser reuse the preflight answer; without it every polled
+  // request is preceded by an OPTIONS call that also counts against the rate limit.
+  app.register(cors, { origin: allowedOrigins, maxAge: 600 });
 
   // /db-check is public and unauthenticated; without a limit it's an easy
   // way to exhaust RDS connections. Global limit for everything else.
-  app.register(rateLimit, { max: 60, timeWindow: "1 minute" });
+  // The dashboard polls several endpoints every few seconds, so the global limit
+  // has to leave room for that; costly routes set their own tighter limits.
+  app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
 
   app.get("/health", async () => {
     return { status: "ok" };
@@ -69,6 +74,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.register(dashboardRoutes, { createDbClient, publish, dashboardToken });
   app.register(calendarRoutes, { createDbClient, publish, dashboardToken });
+  app.register(studyRoutes, { createDbClient, publish, dashboardToken });
 
   return app;
 }

@@ -5,6 +5,7 @@ export type Publish = (channel: string, message: string) => Promise<void>;
 // api -> agent notifications. The DB row is the source of truth; this is only a nudge.
 export const APPROVALS_CHANNEL = "friday:approvals";
 export const CALENDAR_CHANNEL = "friday:calendar";
+export const STUDY_CHANNEL = "friday:study";
 
 const READY_WAIT_MS = 2000;
 

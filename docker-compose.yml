@@ -78,6 +78,17 @@ services:
       LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
       LLM_FALLBACK_BASE_URL: ${LLM_FALLBACK_BASE_URL:-}
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
+      # Study agent: each job can run on its own model. Empty = use the LLM_* values above.
+      # To upgrade a job to Claude, set its model to claude-... and give it an Anthropic key.
+      STUDY_PLAN_API_KEY: ${STUDY_PLAN_API_KEY:-}
+      STUDY_PLAN_BASE_URL: ${STUDY_PLAN_BASE_URL:-}
+      STUDY_PLAN_MODEL: ${STUDY_PLAN_MODEL:-}
+      STUDY_MATERIAL_API_KEY: ${STUDY_MATERIAL_API_KEY:-}
+      STUDY_MATERIAL_BASE_URL: ${STUDY_MATERIAL_BASE_URL:-}
+      STUDY_MATERIAL_MODEL: ${STUDY_MATERIAL_MODEL:-}
+      STUDY_DAILY_CALLS: ${STUDY_DAILY_CALLS:-40}
+      # zh-TW = cards and questions in Traditional Chinese; en = English questions.
+      STUDY_MATERIAL_LANGUAGE: ${STUDY_MATERIAL_LANGUAGE:-zh-TW}
       # iCloud CalDAV. Agent only: the public-facing api never gets these.
       ICLOUD_USERNAME: ${ICLOUD_USERNAME:-}
       ICLOUD_APP_PASSWORD: ${ICLOUD_APP_PASSWORD:-}

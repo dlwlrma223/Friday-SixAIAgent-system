@@ -166,6 +166,74 @@ CREATE TABLE calendar_intents (      -- a sentence typed on the dashboard for th
   completed_at TIMESTAMPTZ
 );
 
+CREATE TABLE study_goals (           -- something to learn, and the plan the study agent wrote for it
+  id SERIAL PRIMARY KEY,
+  subject_id INT REFERENCES subjects(id),
+  request_text TEXT NOT NULL,
+  title TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending / planned / failed
+  overview TEXT,
+  facts JSONB NOT NULL DEFAULT '[]',       -- [{label, value}]
+  total_weeks INT,
+  sources JSONB NOT NULL DEFAULT '[]',     -- [{id, title, url}]
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE study_modules (         -- one chapter of a study plan
+  id SERIAL PRIMARY KEY,
+  goal_id INT NOT NULL REFERENCES study_goals(id) ON DELETE CASCADE,
+  position INT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT,
+  topics TEXT[] NOT NULL DEFAULT '{}',
+  est_hours NUMERIC,
+  week INT,
+  source_ids INT[] NOT NULL DEFAULT '{}',
+  materials_status TEXT NOT NULL DEFAULT 'none',  -- none / pending / ready / failed (added in 0019)
+  materials_error TEXT,
+  materials_sources JSONB NOT NULL DEFAULT '[]',
+  UNIQUE (goal_id, position)
+);
+
+CREATE TABLE study_cards (           -- flash cards for one module
+  id SERIAL PRIMARY KEY,
+  module_id INT NOT NULL REFERENCES study_modules(id) ON DELETE CASCADE,
+  position INT NOT NULL,
+  front TEXT NOT NULL,
+  back TEXT NOT NULL,
+  UNIQUE (module_id, position)
+);
+
+CREATE TABLE study_questions (       -- multiple-choice questions for one module, always 4 options
+  id SERIAL PRIMARY KEY,
+  module_id INT NOT NULL REFERENCES study_modules(id) ON DELETE CASCADE,
+  position INT NOT NULL,
+  question TEXT NOT NULL,
+  options JSONB NOT NULL,
+  correct_index INT NOT NULL,              -- 0-3
+  explanation TEXT,
+  UNIQUE (module_id, position)
+);
+
+CREATE TABLE study_attempts (        -- every answer given; drives spaced repetition later
+  id SERIAL PRIMARY KEY,
+  question_id INT NOT NULL REFERENCES study_questions(id) ON DELETE CASCADE,
+  chosen_index INT NOT NULL,
+  is_correct BOOLEAN NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE llm_usage (             -- one row per LLM call, for cost tracking and caps
+  id SERIAL PRIMARY KEY,
+  purpose TEXT NOT NULL,                   -- study_plan / study_material / ...
+  model TEXT NOT NULL,
+  input_tokens INT NOT NULL DEFAULT 0,
+  output_tokens INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- pgvector tables added per-agent as needed (study notes, CV/JD embeddings)
 ```
 
@@ -220,12 +288,24 @@ How it fits together:
 
 Still open: not deployed to prod (needs migrations 0010–0012 on RDS, Secrets Manager entries for iCloud + LLM keys, a new agent task definition). The security review of the Phase 3 diff promised before any prod deploy has not been run yet.
 
-### Phase 4 — Study agent
-- [ ] `subjects` seeded with the 5 subjects the user gave: English, Japanese, taxi license (的士牌), electrician (電工), AWS SAA
-- [ ] `study_sessions` logging endpoint
-- [ ] pgvector table for notes per subject, semantic search endpoint
-- [ ] Spaced-repetition scheduling logic (SM-2 or similar) surfaces "review this today" prompts on the dashboard
-- **Done when:** logging a study session updates progress, and the dashboard surfaces a due-for-review item correctly after the algorithm's interval.
+### Phase 4 — Study agent (redefined by the user 2026-10-04; in progress)
+
+The user does not want a study logger. They want to state a goal ("我想考 CCNA") and have the agent research it and produce the plan and the materials. Original items (subjects, sessions, pgvector notes, spaced repetition) are folded into the stages below, not dropped.
+
+- [x] **4a — goal → research → study plan.** `POST /study/goals` records the sentence; the agent (`agent/src/study/`, a LangGraph: `draft_queries` → `research` → `write_plan`) asks the LLM for search queries, runs them through `ResearchService` (so they are logged and pass the PII guard), and writes a plan from the numbered sources: overview, exam facts, modules with topics / hours / week / cited sources. Stored in `study_goals` + `study_modules`; new subjects are added to `subjects`. Built and verified locally 2026-10-04 with Gemini (CCNA: 3 searches, 14 sources, 6 modules, ~14s). **Waiting for the user to try it and judge the plan.**
+- [x] **4b — study cards and multiple-choice questions** per module. A "Generate cards & quiz" button on each module calls `POST /study/modules/:id/materials`; the agent (`agent/src/study/materials.py`, `build_materials_graph`) searches for the module through Research (queries built in code from the plan, not by the model) and has the `STUDY_MATERIAL` model write 8–12 cards and 8–10 four-option questions. Questions in English, explanations in Traditional Chinese with English terms. Malformed items are dropped and options are shuffled in code so the answer position carries no hint. The dashboard shows flip cards and a one-question-at-a-time quiz; answers are checked server-side (`POST /study/questions/:id/answer`, the correct answer is never sent with the question) and every attempt is stored in `study_attempts` for 4d. Built and verified locally 2026-10-04 with Gemini (~15s per module). **Waiting for the user to try it and judge the quality.**
+- [ ] **4c — PDF notes** per module. Files stored locally for now (S3 when this goes to prod).
+- [ ] **4d — spaced repetition** from quiz results ("review this today"). Decide after 4b. This carries the original "Done when".
+- ~~4e — podcast audio~~ — the user decided not to build this.
+- **Done when (4a–4c):** stating a goal yields a researched plan, and each module can produce cards, a quiz and a PDF the user finds usable.
+
+Models (user decision 2026-10-04): start on the free Gemini tier, upgrade later to **Claude Opus 5.5 for planning and Claude Sonnet 5.5 for materials**. Each job has its own `<ROLE>_API_KEY` / `_BASE_URL` / `_MODEL` in `.env` (`STUDY_PLAN_*`, `STUDY_MATERIAL_*`); empty values fall back to `LLM_*`. Switching is a `.env` edit plus recreating the agent, no code change. A Claude subscription (Max/Pro) does not cover API usage; the Anthropic API key is separate and prepaid. The Claude path (`agent/src/tools/llm_anthropic.py`, structured outputs, `fallbacks: "default"`) has only been tested with fakes — verify it against the real API when the key arrives.
+
+Cost control: every model call is recorded in `llm_usage`; `STUDY_DAILY_CALLS` (default 40 per 24h) stops the study agent before a call when exceeded.
+
+Data leaving the system: the goal sentence and the search snippets go to the LLM; search queries go to Tavily. Generated material must cite its sources; it is AI-written and not guaranteed correct.
+
+Later (user's stated direction, not this phase): one shared input box with a router agent that sends each sentence to the right agent. Calendar and Study already use the same "record the sentence → Redis nudge → agent processes" shape so they can be merged.
 
 ### Phase 5 — Home agent
 - [ ] **[ASK USER]** whether Home Assistant is already running, or needs to be set up (this is manual setup outside code — flag it, don't attempt to automate device pairing)

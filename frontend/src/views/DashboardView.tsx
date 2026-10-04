@@ -84,6 +84,24 @@ function DashboardView() {
         <div className="ask-history" id="askHistory"></div>
       </div>
 
+      <div className="panel ask-panel">
+        <div className="panel-head">
+          <h2>Tell the Study Agent</h2>
+          <span className="count">researches the goal · writes a study plan</span>
+        </div>
+        <form className="ask-form" id="studyForm" autoComplete="off">
+          <input
+            id="studyInput"
+            type="text"
+            maxLength={500}
+            required
+            aria-label="Tell the study agent what you want to learn"
+          />
+          <button className="btn approve" type="submit">Send</button>
+        </form>
+        <div className="study-goals" id="studyGoals"></div>
+      </div>
+
       <div className="bottom-grid">
         <div className="panel">
           <div className="panel-head"><h2>Run Log</h2><span className="count">live</span></div>

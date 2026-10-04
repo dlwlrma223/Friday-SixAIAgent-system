@@ -28,6 +28,59 @@ export interface CalendarIntent {
   error: string | null;
 }
 
+export interface StudyGoalSummary {
+  id: number;
+  request_text: string;
+  title: string | null;
+  status: "pending" | "planned" | "failed";
+  error: string | null;
+  total_weeks: number | null;
+  modules: number;
+}
+
+export type MaterialsStatus = "none" | "pending" | "ready" | "failed";
+
+export interface StudyMaterials {
+  module: {
+    id: number;
+    materials_status: MaterialsStatus;
+    materials_sources: Array<{ id: number; title: string; url: string }>;
+  };
+  cards: Array<{ id: number; front: string; back: string }>;
+  questions: Array<{ id: number; question: string; options: string[] }>;
+}
+
+export interface AnswerResult {
+  correct: boolean;
+  correct_index: number;
+  explanation: string | null;
+}
+
+export interface StudyModule {
+  id: number;
+  materials_status: MaterialsStatus;
+  materials_error: string | null;
+  position: number;
+  title: string;
+  summary: string | null;
+  topics: string[];
+  est_hours: string | number | null;
+  week: number | null;
+  source_ids: number[];
+}
+
+export interface StudyGoalDetail {
+  goal: {
+    id: number;
+    title: string | null;
+    overview: string | null;
+    facts: Array<{ label: string; value: string }>;
+    total_weeks: number | null;
+    sources: Array<{ id: number; title: string; url: string }>;
+  };
+  modules: StudyModule[];
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -92,4 +145,31 @@ export async function fetchCalendarIntents(): Promise<CalendarIntent[]> {
 // Only records the sentence: the agent drafts an event, and that still needs approval.
 export async function sendCalendarIntent(text: string): Promise<void> {
   await request("/calendar/intents", "POST", { text });
+}
+
+export async function fetchStudyGoals(): Promise<StudyGoalSummary[]> {
+  return (await request<{ goals: StudyGoalSummary[] }>("/study/goals")).goals;
+}
+
+export async function fetchStudyGoal(id: number): Promise<StudyGoalDetail> {
+  return request<StudyGoalDetail>(`/study/goals/${id}`);
+}
+
+// Only records the goal: the agent researches it and writes the plan.
+export async function sendStudyGoal(text: string): Promise<void> {
+  await request("/study/goals", "POST", { text });
+}
+
+// Queues the request: the agent writes the cards and questions.
+export async function requestStudyMaterials(moduleId: number): Promise<void> {
+  await request(`/study/modules/${moduleId}/materials`, "POST");
+}
+
+export async function fetchStudyMaterials(moduleId: number): Promise<StudyMaterials> {
+  return request<StudyMaterials>(`/study/modules/${moduleId}/materials`);
+}
+
+// The server checks the answer and records the attempt.
+export async function answerStudyQuestion(questionId: number, chosenIndex: number): Promise<AnswerResult> {
+  return request<AnswerResult>(`/study/questions/${questionId}/answer`, "POST", { chosen_index: chosenIndex });
 }
