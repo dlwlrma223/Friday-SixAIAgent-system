@@ -70,6 +70,11 @@ services:
       DB_SSL: disable
       # Read from .env; empty means Research tool refuses to start, nothing else breaks.
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      # iCloud CalDAV. Agent only: the public-facing api never gets these.
+      ICLOUD_USERNAME: ${ICLOUD_USERNAME:-}
+      ICLOUD_APP_PASSWORD: ${ICLOUD_APP_PASSWORD:-}
+      CALENDAR_SYNC_DAYS: ${CALENDAR_SYNC_DAYS:-30}
+      CALENDAR_SYNC_MINUTES: ${CALENDAR_SYNC_MINUTES:-30}
     volumes:
       - ./agent:/app
     depends_on:

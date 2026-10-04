@@ -132,11 +132,11 @@ CREATE TABLE research_queries (      -- audit log of every Research call, sent o
 
 Work through phases in order. Each phase has a "definition of done" — do not mark a phase complete or move on until it's met. Stop and ask the user (do not guess) whenever a phase requires a credential, an external account signup, or a decision explicitly marked **[ASK USER]** below.
 
-### Phase 0 — Local Docker environment
-- [ ] `docker-compose.yml` bringing up `frontend`, `api`, `agent`, `db` (postgres:16), `redis` (redis:7)
-- [ ] `api` exposes a health check endpoint
-- [ ] `agent` connects to Redis and logs a heartbeat
-- [ ] `frontend` can hit `api` health check and render status
+### Phase 0 — Local Docker environment ✅ done
+- [x] `docker-compose.yml` bringing up `frontend`, `api`, `agent`, `db` (`pgvector/pgvector:pg16` — plain postgres:16 has no pgvector), `redis` (redis:7)
+- [x] `api` exposes a health check endpoint
+- [x] `agent` connects to Redis and logs a heartbeat
+- [x] `frontend` can hit `api` health check and render status
 - **Done when:** `docker compose up` brings up all 5 services with no errors, frontend shows "connected".
 
 ### Phase 1 — AWS foundation ✅ done
@@ -156,7 +156,14 @@ Bonus (beyond this phase's checklist): `frontend` deployed to S3 + CloudFront (s
 - [x] Implement as a callable tool inside the `agent` orchestrator, not a standalone user-facing agent — `agent/src/graph.py` (LangGraph node) → `agent/src/research/service.py` → `agent/src/tools/research.py`; PII guard (`agent/src/tools/pii_guard.py` + `personal_terms` table) parks suspicious queries as a pending approval instead of sending them
 - **Done when:** another agent (test with a stub) can call Research and get back structured results. — verified 2026-09-23 with stubbed search/store tests, a real Tavily call locally, and the ECS agent task (task def rev 4) reaching RDS + Tavily key in prod.
 
-Not in this phase: dashboard approve endpoint for parked research queries (api), and wiring `ResearchService` into `agent/src/main.py` once a calling agent exists.
+Follow-up done 2026-10-04 (dashboard approval for parked research queries, verified locally end to end):
+- `api`: `GET /approvals`, `GET /research/queries`, `POST /approvals/:id/approve|skip` (`api/src/dashboard.ts`), all behind `Authorization: Bearer <DASHBOARD_TOKEN>` (`api/src/auth.ts`, fails closed with 503 when the token is unset). After the DB update the api publishes to Redis channel `friday:approvals` (`api/src/pubsub.ts`).
+- `agent`: `src/main.py` subscribes to that channel. The message is only a nudge — the agent asks the DB which parked queries were decided (`ResearchService.process_resolved()`), also every 60s and on reconnect, under a Postgres advisory lock.
+- `frontend`: "Needs Your Approval" and "Run Log" panels read the api (`frontend/src/api.ts`); every other panel is still seed data. DB text is rendered with `textContent`, never `innerHTML`.
+
+Still open: these routes are not enabled in prod (no `DASHBOARD_TOKEN` secret; the CloudFront frontend is HTTPS and the api is HTTP-only, so the browser blocks it — needs HTTPS in front of the api). No agent calls `ResearchService.request()` from `main.py` yet; that waits for the first calling agent.
+
+Handoff docs: `PROJECT_STATE.md` (where things stand) and `HANDOFF.md` (how to pick the work up) live outside this repo in `~/Documents/sidePorject/` (the user keeps them there; not in git) — read both at the start of a new session and update them after each phase.
 
 ### Phase 3 — Calendar agent
 - [ ] **[ASK USER]** for iCloud app-specific password before implementing — do not attempt with the primary Apple ID password
